@@ -6,26 +6,27 @@ import pandas as pd
 import tensorflow as tf
 
 from tqdm import tqdm
-from keras.layers import Input, Dropout, Dense, GlobalAveragePooling2D, BatchNormalization, Activation
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, TensorBoard
+from keras.layers import Input, Dropout, Dense, GlobalAveragePooling2D, BatchNormalization, Activation, concatenate
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 from tensorflow.keras.models import Model
 from tensorflow.keras.applications import MobileNetV3Large
 from tensorflow.keras.applications.mobilenet_v3 import preprocess_input
 from keras.losses import CategoricalCrossentropy
 from keras.metrics import Recall, Precision
 
+from sklearn.model_selection import train_test_split
 
-class Mobilenet:
+class Multimodal:
     def __init__(self):
         self.config = {
             'IMG_SIZE': (224, 224, 3),
-            'EPOCHS':300,
+            'EPOCHS':100,
             'LEARNING_RATE':1e-4,
-            'BATCH_SIZE':256,
+            'BATCH_SIZE':16,
             'SEED':41,
             'N_CLASS': 5
         }
-        
+
 
     def load_data(self, root_dir):
         data_format = {'.jpg':[], '.json':[]}
@@ -46,56 +47,71 @@ class Mobilenet:
         return df
 
 
-
     def json_parsing(self, df):
-        def get_bBox(json_path):
+        def get_data(json_path):
             with open(json_path, 'r') as f:
                 jsonData = json.load(f)
-            try:
-                bBox = jsonData['bounding_box']
-            except:
-                bBox = jsonData['이미지']['face_box']
-            return bBox
+            return (jsonData['이미지']['face_box'],
+                    jsonData['소음']['decibel'],
+                    jsonData['뇌파']['brain_alpha'],
+                    jsonData['뇌파']['brain_beta'],
+                    jsonData['뇌파']['brain_theta'],
+                    jsonData['뇌파']['brain_delta'],
+                    jsonData['뇌파']['brain_gamma'])
         
-        bBox = []
+        bBox, decibel = [], []
+        alpha, beta, theta, delta, gamma = [], [], [], [], []
         for jsonPath in tqdm(df['json_path'].values, total=len(df)):
-            bBox.append(get_bBox(jsonPath))
-        df['bBox'] = bBox
-        df = df.drop('idx', axis=1)
+            bb, db, a, b, t, d, g = get_data(jsonPath)
+            bBox.append(bb)
+            decibel.append(db)
+            alpha.append(a)
+            beta.append(b)
+            theta.append(t)
+            delta.append(d)
+            gamma.append(g)
 
+        df['bBox'] = bBox
         df['begin'] = df['bBox'].apply(lambda x: [x[0][1], x[0][0], 0])
         df['size'] = df['bBox'].apply(lambda x: [x[1][1]-x[0][1], x[1][0]-x[0][0], 3])
-        df = df.drop(columns=['json_path', 'bBox'])
+        df['decibel'] = decibel
+        df['alpha'] = alpha
+        df['beta']  = beta
+        df['theta'] = theta
+        df['delta'] = delta
+        df['gamma'] = gamma
+
         return df
 
     
+    def data_flatten(self, df):
+        tot = []
+        df = df.drop(columns=['json_path', 'bBox', 'idx'], axis=1)
+        for USER_ID, CLS_CD, image_path, begin, size, decibel, alpha, beta, theta, delta, gamma in df.values:
+            tmp = []
+            tmp.append(USER_ID)
+            tmp.append(CLS_CD)
+            tmp.append(image_path)
+            tmp.append(begin)
+            tmp.append(size)
+            tmp.append(decibel)
+            tmp.extend(alpha)
+            tmp.extend(beta)
+            tmp.extend(theta)
+            tmp.extend(delta)
+            tmp.extend(gamma)
+            tot.append(tmp)
+
+        return pd.DataFrame(tot, columns=['USER_ID', 'CLS_CD', 'path', 'begin', 'size', 'decibel']+list(range(80)))
+
+
     def data_split(self, df):
-        # 벨텍에서 train, valid, test 유저 정보 전달
-        # 전달 받은 유저ID 기준으로 데이터셋 분할 예정
-        tot = df['USER_ID'].nunique()
-        valid_ratio = int(tot*0.1)
-        test_ratio = int(tot*0.1)
-        train_ratio = tot-valid_ratio-test_ratio
-
-        np.random.seed(self.config['SEED'])
-        src_idx = np.array(range(tot))
-        valid_idx = np.random.choice(src_idx, valid_ratio, replace=False)
-
-        remain = np.setdiff1d(src_idx, valid_idx)
-        test_idx = np.random.choice(remain, test_ratio, replace=False)
-
-        train_idx = np.setdiff1d(src_idx, np.concatenate([valid_idx, test_idx]))
-
-        userList = df['USER_ID'].unique()
-        train = [userList[i] for i in train_idx]
-        valid = [userList[i] for i in valid_idx]
-        test = [userList[i] for i in test_idx]
-
-        self.df_train = df[df['USER_ID'].isin(train)].sample(frac=1, random_state=self.config['SEED']).reset_index(drop=True)
-        self.df_valid = df[df['USER_ID'].isin(valid)].sample(frac=1, random_state=self.config['SEED']).reset_index(drop=True)
+        df_train, df_valid = train_test_split(df, test_size=0.2, random_state=self.config['SEED'])
+        df_valid, df_test = train_test_split(df_valid, test_size=0.5, random_state=self.config['SEED'])
+        self.df_train, self.df_valid = df_train, df_valid
 
 
-    def preprocessing(self, path, begin, size, label, isTrain=False):
+    def preprocessing(self, path, begin, size, decibel, eeg, label, isTrain=False):
         label = tf.one_hot(label, 5)
         
         bin = tf.io.read_file(path)
@@ -115,64 +131,79 @@ class Mobilenet:
             image = tf.image.random_hue(image, max_delta=0.05)
 
         image = tf.squeeze(image)
-        return image, label
+        return (image, decibel, eeg), label
 
 
     def generator_train(self):
         for item in self.df_train.values:
-            # image_path, begin, size, label
-            yield item[2], item[3], item[4], item[1]
+            # image_path, begin, size, decibel, eeg, label
+            yield item[2], item[3], item[4], item[5], item[6:], item[1]
 
-
+    
     def generator_valid(self):
         for item in self.df_valid.values:
-            # image_path, begin, size, label
-            yield item[2], item[3], item[4], item[1]
+            # image_path, begin, size, decibel, eeg, label
+            yield item[2], item[3], item[4], item[5], item[6:], item[1]
 
 
     def generate_dataset(self):
         dataset_train = tf.data.Dataset.from_generator(
             self.generator_train,
-            (tf.string, tf.int32, tf.int32, tf.int32),
-            ((), (3,), (3,), ())
+            (tf.string, tf.int32, tf.int32, tf.float32, tf.float32, tf.int32),
+            ((), (3,), (3,), (10,), (80,), ())
             )
 
         dataset_valid = tf.data.Dataset.from_generator(
             self.generator_valid,
-            (tf.string, tf.int32, tf.int32, tf.int32),
-            ((), (3,), (3,), ())
+            (tf.string, tf.int32, tf.int32, tf.float32, tf.float32, tf.int32),
+            ((), (3,), (3,), (10,), (80,), ())
             )
+
         dt = dataset_train.map(lambda *x:self.preprocessing(*x, True), 
-                            num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        dt = dt.batch(self.config['BATCH_SIZE']).prefetch(10)
+                       num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        dt = dt.batch(self.config['BATCH_SIZE']).prefetch(3)
         dv = dataset_valid.map(self.preprocessing, 
                             num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        dv = dv.batch(self.config['BATCH_SIZE']).prefetch(10)
+        dv = dv.batch(self.config['BATCH_SIZE']).prefetch(3)
         return dt, dv
 
 
     def get_model(self):
-        def fc_blocks(x, channels):
+        def fc_blocks(x, channels, act='relu', ratio=0.2):
             x = Dense(channels)(x)
             x = BatchNormalization()(x)
-            x = Activation('relu')(x)
-            x = Dropout(0.2)(x)
+            x = Activation(act)(x)
+            x = Dropout(ratio)(x)
             return x
+
         backbone = MobileNetV3Large(include_top=False, 
-                        input_shape=self.config['IMG_SIZE'],
-                        weights='imagenet')
+                       input_shape=self.config['IMG_SIZE'],
+                       weights='imagenet')
+    
+        input1 = Input(shape=self.config['IMG_SIZE'], dtype=tf.float32)
+        input2 = Input(shape=(10,), dtype=tf.float32)
+        input3 = Input(shape=(80,), dtype=tf.float32)
         
-        input = Input(shape=self.config['IMG_SIZE'], dtype=tf.float32)
+        x1 = preprocess_input(input1)
+        x1 = backbone(x1)
+        x1 = GlobalAveragePooling2D()(x1)
+        x1 = fc_blocks(x1, 128, 'relu', 0.2)
+        x1 = fc_blocks(x1, 32, 'relu', 0.2)
+
+        x2 = fc_blocks(input2, 32, 'relu', 0.2)
         
-        x = preprocess_input(input)
-        x = backbone(x)
-        x = GlobalAveragePooling2D()(x)
-        
-        x = fc_blocks(x, 128)
-        x = fc_blocks(x, 32)
+        m = tf.reduce_min(input3)
+        M = tf.reduce_max(input3)
+        x3 = (input3 - m) / (M - m)
+        x3 = fc_blocks(x3, 64, 'tanh', 0.2)
+        x3 = fc_blocks(x3, 128, 'tanh', 0.2)
+        x3 = fc_blocks(x3, 32, 'tanh', 0.2)
+
+        x = concatenate([x1, x2, x3])
+        x = fc_blocks(x, 8, 'relu', 0.2)
         
         output = Dense(5, activation='softmax')(x)
-        model = Model(inputs=input, outputs=output)        
+        model = Model(inputs=[input1, input2, input3], outputs=output)
         return backbone, model
 
 
@@ -180,23 +211,7 @@ class Mobilenet:
         backbone.trainable = False
         es = EarlyStopping(monitor='val_loss', 
                         patience=10)
-        mc = ModelCheckpoint('/app/train/Mobilenet/pre_best.h5', 
-                            monitor='val_loss', 
-                            mode='min', 
-                            verbose=1, 
-                            save_best_only=True)
-        
-        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.config['LEARNING_RATE']), 
-                    loss=[CategoricalCrossentropy(from_logits=False)], 
-                    metrics=[Recall(), Precision()])
-        model.fit(dt, epochs=self.config['EPOCHS']//3, validation_data=dv, callbacks=[es, mc])
-        model.save(f'/app/train/Mobilenet/pre_last.h5')
-        pre_result = model.evaluate(dtest)
-
-        backbone.trainable = True
-        es = EarlyStopping(monitor='val_loss', 
-                        patience=10)
-        mc = ModelCheckpoint(f'/app/train/Mobilenet/best.h5', 
+        mc = ModelCheckpoint('/app/train/model/Multimodal/best.h5', 
                             monitor='val_loss', 
                             mode='min', 
                             verbose=1, 
@@ -206,21 +221,19 @@ class Mobilenet:
                     loss=[CategoricalCrossentropy(from_logits=False)], 
                     metrics=[Recall(), Precision()])
         model.fit(dt, epochs=self.config['EPOCHS'], validation_data=dv, callbacks=[es, mc])
-        model.save(f'/app/train/Mobilenet/last.h5')
-
+        model.save('/app/train/model/Multimodal/last.h5')
 
 
 if __name__=="__main__":
-    pred = Mobilenet()
-
-    # 데이터 로드
+    pred = Multimodal()
+    
     print('전체 데이터 로드')
-    df = pred.load_data('/app/data/Mobilenet_data')
+    df = pred.load_data('/app/data/Multimodal_data')
     print('전체 데이터 수:', len(df), '\n')
 
-    # json 파싱
     print('학습, 검증 데이터 추출')
     df = pred.json_parsing(df)
+    df = pred.data_flatten(df)
     pred.data_split(df)
     print(f'학습 데이터 수: {len(pred.df_train)}, 검증 데이터 수: {len(pred.df_valid)}', '\n')
     dt, dv = pred.generate_dataset()
