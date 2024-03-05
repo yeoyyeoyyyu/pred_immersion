@@ -7,10 +7,12 @@ import tensorflow as tf
 
 from tqdm import tqdm
 from keras.layers import Input, Dropout, Dense, GlobalAveragePooling2D, BatchNormalization, Activation, concatenate
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
-from tensorflow.keras.models import Model
-from tensorflow.keras.applications import MobileNetV3Large
-from tensorflow.keras.applications.mobilenet_v3 import preprocess_input
+from keras.layers import Input, Conv1D, Activation, BatchNormalization
+from keras.layers import MaxPool1D, Dropout, GlobalAveragePooling1D, Dense
+from keras.callbacks import EarlyStopping, ModelCheckpoint
+from keras.models import Model
+from keras.applications import MobileNetV3Large
+from keras.applications.mobilenet_v3 import preprocess_input
 from keras.losses import CategoricalCrossentropy
 from keras.metrics import Recall, Precision
 
@@ -175,6 +177,18 @@ class Multimodal:
             x = Activation(act)(x)
             x = Dropout(ratio)(x)
             return x
+        
+        def cnn_blocks(x, c, k, s, p):
+            x = Conv1D(c, kernel_size=k, strides=s, padding=p)(x)
+            x = BatchNormalization()(x)
+            x = Activation('gelu')(x)
+            x = Conv1D(c, kernel_size=1)(x)
+            x = BatchNormalization()(x)
+            x = Activation('gelu')(x)
+            x = Conv1D(c, kernel_size=1)(x)
+            x = BatchNormalization()(x)
+            x = Activation('gelu')(x)
+            x = MaxPool1D(3, 2, 'same')
 
         backbone = MobileNetV3Large(include_top=False, 
                        input_shape=self.config['IMG_SIZE'],
@@ -195,8 +209,10 @@ class Multimodal:
         m = tf.reduce_min(input3)
         M = tf.reduce_max(input3)
         x3 = (input3 - m) / (M - m)
-        x3 = fc_blocks(x3, 64, 'tanh', 0.2)
-        x3 = fc_blocks(x3, 128, 'tanh', 0.2)
+        x3 = cnn_blocks(x3, 4, 2, 2, 'valid')
+        x3 = cnn_blocks(x3, 16, 2, 1, 'same')
+        x3 = cnn_blocks(x3, 64, 2, 1, 'same')
+        x3 = cnn_blocks(x3, 128, 2, 1, 'same')
         x3 = fc_blocks(x3, 32, 'tanh', 0.2)
 
         x = concatenate([x1, x2, x3])
