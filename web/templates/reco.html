@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>추천 강의</title>
+    <style>
+        .video-container {
+            position: relative; 
+            width: 896px; 
+        }
+        #next {
+            position: absolute; 
+            bottom: -40px; 
+            right: 0; 
+            width: 110px;
+            height: 30px;
+        }
+        .rating-container {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="video-container">
+        <video id="content" width="896px" height="504px" controls>
+            <source src="{{ reco_video_path }}" type="video/mp4">
+        </video>
+        <button id="next" onclick="submitRatingAndProceed()">다음 단계</button>
+    </div>
+    <div class="rating-container">
+        <label for="rating">평점:</label>
+        <input type="text" id="rating" name="rating" pattern="^[1-5]$" title="평점은 1에서 5 사이의 숫자여야 합니다.">
+    </div>
+    <script>
+        // metadata_id를 JavaScript 변수로 추가
+        var metadata_id = "{{ metadata_id }}";
+        var log_id = "{{ log_id }}";
+        var myVideo = document.getElementById('content');
+        
+        myVideo.addEventListener('ended', function() {
+            alert('평점을 입력하고 다음 단계 버튼을 눌러주세요.');
+        });
+
+        function next_page() {
+            var nextUrl = "{{ next_video_url }}" + "?metadata_id=" + metadata_id;
+            window.location.href = nextUrl;
+        }
+
+        function submitRatingAndProceed() {
+            var rating = document.getElementById('rating').value;
+            if (!rating.match(/^[1-5]$/)) {
+                alert('평점은 1에서 5 사이의 숫자여야 합니다.');
+                return;
+            }
+        
+            fetch('/save_rating', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    rating: rating,
+                    log_id: "{{ log_id }}"
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    next_page();
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            });
+        }
+    </script>       
+</body>
+</html>

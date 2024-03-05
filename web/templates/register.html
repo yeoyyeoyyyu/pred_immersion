@@ -1,0 +1,21 @@
+<!-- templates/register.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>메타데이터 등록</title>
+</head>
+<body>
+    <form action="/metadata" method="post">
+        <label for="USER_NN">이름:</label>
+        <input type="text" id="USER_NN" name="USER_NN" required><br><br>
+
+        <label for="BIRTH_DT">출생년월:</label>
+        <input type="text" id="BIRTH_DT" name="BIRTH_DT" pattern="^\d{2}(0[1-9]|1[0-2])$" title="출생년월로 기입해주세요(ex..9401)" required><br><br>
+
+        <label for="PHONE_NUM">전화번호 뒷자리:</label>
+        <input type="text" id="PHONE_NUM" name="PHONE_NUM" pattern="^\d{4}$" title="0000 으로 기입 해주세요" required><br><br>
+
+        <input type="submit" value="제출">
+    </form>
+</body>
+</html>

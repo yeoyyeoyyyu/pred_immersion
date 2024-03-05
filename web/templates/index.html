@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+    <html>
+        <head>
+            <meta charset="utf-8">
+            <!-- 얼굴 인식 모델 사용을 위한 모듈 -->
+            <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.1/camera_utils.js" crossorigin="anonymous"></script>
+            <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils@0.1/control_utils.js" crossorigin="anonymous"></script>
+            <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.1/drawing_utils.js" crossorigin="anonymous"></script>
+            <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+            <!-- 몰입도 진단 모델 사용을 위한 모듈 -->
+            <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@2.0.0/dist/tf.min.js"></script>
+        </head>
+            <style>
+                .container {
+                    display: flex;
+                    padding: 10px;
+                }
+                #next {
+                    width: 110px;
+                    height: 30px;
+                }
+                #reco {
+                    width: 110px;
+                    height: 30px;
+                }
+            </style>
+        <body>
+            <div class="container">
+                <div class="asf">
+                    <!-- <video id="content" width="896px" height="504px" controls preload="auto"> -->
+                    <video id="content" width="896px" height="504px" controls>
+                        <source src="{{ video_path }}" type="video/mp4">
+                    </video>
+                </div>
+                <div class="log" style="padding:10px">
+                    <table>
+                        <tr>
+                            <td><canvas id="canvas" width="224px" height="224px" style="transform: scaleX(-1);"></canvas></td>
+                            <td><video id="video" style="transform: scaleX(-1); display: none;"></video></td>
+                        </tr>
+                    </table>
+                    <div>
+                        <button id="next" onclick="next_page()">다음 영상 시청</button>
+                        <a href="/reco">
+                            <button id="reco">추천 영상 시청</button>
+                        </a>
+                    </div>
+                    <br>
+                    <div>
+                        <!-- <textarea id="imm" rows="10" cols="28"></textarea> -->
+                        <a id="imm"></a>
+                    </div>
+                </div>
+            </div>
+            <div><span id="fps"></span></div>
+            <div><span id="status"></span></div>
+            <div><span id="ratio"></span></div>        
+            <script type="text/javascript" src="/static/index.js"></script>
+        </body>
+    </html>
