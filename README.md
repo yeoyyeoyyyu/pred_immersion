@@ -1,1 +1,1 @@
-# pred_immersion
+# 몰입도 예측 모델
